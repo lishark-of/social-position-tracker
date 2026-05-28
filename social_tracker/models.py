@@ -23,15 +23,26 @@ class PostRecord:
 
 @dataclass
 class PositionClaim:
-    post_id: str
-    source: str
-    author: str
-    url: str
     ticker: str
-    stance: str
-    confidence: float
+    original_ticker_text: str
+    canonical_ticker: str
+    action: str
     evidence: str
+    confidence: float
+    confidence_reason: str
+    claim_type: str
+    position_confidence: float
+    is_position_disclosure: bool
+    source: str
+    source_url: str
+    author: str
     published_at: str = ""
+    captured_at: str = field(default_factory=lambda: datetime.utcnow().isoformat(timespec="seconds"))
+    raw_text: str = ""
+    raw_text_hash: str = ""
+    claim_hash: str = ""
+    language: str = "unknown"
+    post_id: str = ""
     extractor: str = "rules"
 
     def to_dict(self) -> dict[str, Any]:

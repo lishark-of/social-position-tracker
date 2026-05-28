@@ -6,6 +6,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .claim_utils import normalize_claim_dict
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 APP_DATA_DIR = BASE_DIR / "app_data"
@@ -76,7 +78,35 @@ def save_config(config: dict[str, Any]) -> None:
 
 def load_snapshots() -> list[dict[str, Any]]:
     ensure_runtime_files()
-    return _read_json(SNAPSHOT_PATH, [])
+    snapshots = _read_json(SNAPSHOT_PATH, [])
+    normalized_snapshots: list[dict[str, Any]] = []
+    for snapshot in snapshots:
+        normalized = deepcopy(snapshot)
+        normalized_claims = [
+            normalize_claim_dict(claim, fallback_captured_at=snapshot.get("ran_at", ""))
+            for claim in snapshot.get("claims", [])
+        ]
+        normalized["claims"] = normalized_claims
+        normalized.setdefault("claim_count", len(normalized_claims))
+        normalized.setdefault("new_claim_count", len(normalized_claims))
+        normalized.setdefault("duplicate_claim_count", 0)
+        normalized.setdefault("changed_opinion_count", 0)
+        normalized.setdefault(
+            "position_signal_count",
+            sum(1 for claim in normalized_claims if claim.get("claim_type") == "position_signal"),
+        )
+        normalized.setdefault(
+            "opinion_signal_count",
+            sum(1 for claim in normalized_claims if claim.get("claim_type") == "opinion_signal"),
+        )
+        normalized.setdefault(
+            "risk_signal_count",
+            sum(1 for claim in normalized_claims if claim.get("claim_type") == "risk_signal"),
+        )
+        normalized.setdefault("error_count", len(normalized.get("errors", [])))
+        normalized.setdefault("claim_changes", [])
+        normalized_snapshots.append(normalized)
+    return normalized_snapshots
 
 
 def append_snapshot(snapshot: dict[str, Any]) -> None:

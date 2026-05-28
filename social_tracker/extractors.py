@@ -1,89 +1,59 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 import requests
 
+from .claim_utils import (
+    build_claim_hash,
+    classify_signal,
+    detect_language,
+    extract_ticker_mentions,
+    infer_canonical_ticker,
+    normalize_claim_dict,
+    normalize_source,
+    select_evidence,
+    sha256_text,
+)
 from .models import PositionClaim, PostRecord
-
-
-TICKER_PATTERN = re.compile(r"\$([A-Z][A-Z0-9]{1,6})\b")
-POSITIVE_HOLD_PATTERNS = [
-    r"\bmy\s+\$?[A-Z0-9]{1,6}\s+positions?\b",
-    r"\bmy\s+positions?\b",
-    r"\bmy\s+long\b",
-    r"\bi(?:'m| am)\s+long\b",
-    r"\bholding\b",
-    r"\bstill up\b",
-    r"\bown\b",
-]
-POSITIVE_BUY_PATTERNS = [
-    r"\bi bought\b",
-    r"\badding\b",
-    r"\baccumulating\b",
-    r"\bstarted buying\b",
-]
-NEGATIVE_FLAT_PATTERNS = [
-    r"\bzero positions?\b",
-    r"\bno positions?\b",
-    r"\bflat\b",
-]
-NEGATIVE_SELL_PATTERNS = [
-    r"\bsold\b",
-    r"\btrimmed\b",
-    r"\bclosed\b",
-    r"\bout of\b",
-]
-WATCH_PATTERNS = [
-    r"\bfavorites?\b",
-    r"\bbullish\b",
-    r"\bpromising\b",
-    r"\blooks good\b",
-]
-
-
-def _stance_from_text(text: str) -> tuple[str, float, str]:
-    lowered = text.lower()
-    for pattern in NEGATIVE_FLAT_PATTERNS:
-        if re.search(pattern, lowered):
-            return "flat", 0.92, "明确说没有仓位"
-    for pattern in NEGATIVE_SELL_PATTERNS:
-        if re.search(pattern, lowered):
-            return "sell", 0.85, "出现卖出/离场措辞"
-    for pattern in POSITIVE_BUY_PATTERNS:
-        if re.search(pattern, lowered):
-            return "buy", 0.88, "出现买入/加仓措辞"
-    for pattern in POSITIVE_HOLD_PATTERNS:
-        if re.search(pattern, lowered):
-            return "hold", 0.84, "出现持仓/仍持有措辞"
-    for pattern in WATCH_PATTERNS:
-        if re.search(pattern, lowered):
-            return "watch", 0.62, "更像观点或偏好，不一定是仓位"
-    return "watch", 0.45, "只检测到 ticker，没有足够仓位措辞"
 
 
 def extract_claims_by_rules(posts: list[PostRecord]) -> list[PositionClaim]:
     claims: list[PositionClaim] = []
     for post in posts:
-        tickers = sorted(set(TICKER_PATTERN.findall(post.title + " " + post.text)))
-        if not tickers:
+        raw_text = f"{post.title}\n{post.text}".strip()
+        mentions = extract_ticker_mentions(raw_text)
+        if not mentions:
             continue
-        stance, confidence, reason = _stance_from_text(f"{post.title}\n{post.text}")
-        evidence = f"{reason} | {post.text[:220]}"
-        for ticker in tickers:
+        language = detect_language(raw_text)
+        raw_text_hash = sha256_text(raw_text)
+        for mention in mentions:
+            evidence = select_evidence(raw_text, mention["original_ticker_text"])
+            signal = classify_signal(evidence, raw_text)
+            canonical_ticker = mention["canonical_ticker"] or infer_canonical_ticker(mention["original_ticker_text"])
             claims.append(
                 PositionClaim(
-                    post_id=post.post_id,
-                    source=post.source,
-                    author=post.author,
-                    url=post.url,
-                    ticker=ticker,
-                    stance=stance,
-                    confidence=confidence,
+                    ticker=canonical_ticker,
+                    original_ticker_text=mention["original_ticker_text"],
+                    canonical_ticker=canonical_ticker,
+                    action=signal["action"],
                     evidence=evidence,
+                    confidence=signal["confidence"],
+                    confidence_reason=signal["confidence_reason"],
+                    claim_type=signal["claim_type"],
+                    position_confidence=signal["position_confidence"],
+                    is_position_disclosure=signal["is_position_disclosure"],
+                    source=normalize_source(post.source),
+                    source_url=post.url,
+                    author=post.author,
                     published_at=post.published_at,
+                    captured_at=post.fetched_at,
+                    raw_text=raw_text,
+                    raw_text_hash=raw_text_hash,
+                    claim_hash=build_claim_hash(canonical_ticker, signal["action"], evidence, post.url, raw_text_hash),
+                    language=language,
+                    post_id=post.post_id,
                     extractor="rules",
                 )
             )
@@ -93,8 +63,7 @@ def extract_claims_by_rules(posts: list[PostRecord]) -> list[PositionClaim]:
 def _extract_json_block(text: str) -> Any:
     stripped = text.strip()
     if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
-        stripped = re.sub(r"\s*```$", "", stripped)
+        stripped = stripped.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(stripped)
 
 
@@ -114,12 +83,12 @@ def extract_claims_by_llm(posts: list[PostRecord], llm_config: dict[str, Any]) -
         for post in posts[:20]
     ]
     prompt = (
-        "You extract self-reported stock position claims from social posts.\n"
+        "You extract conservative public investment signals from social posts.\n"
         "Return JSON only: an array of objects.\n"
-        "Each object must contain: post_id, ticker, stance, confidence, evidence.\n"
-        "stance must be one of: buy, hold, sell, flat, watch.\n"
-        "Use hold only when the author strongly implies an existing position.\n"
-        "Use flat when the author clearly says they have no position.\n"
+        "Each object must contain: post_id, original_ticker_text, action, evidence, confidence, confidence_reason, claim_type, position_confidence, is_position_disclosure.\n"
+        "action must be one of: 买入, 持有, 卖出, 空仓, 观察.\n"
+        "claim_type must be one of: position_signal, opinion_signal, risk_signal, unknown.\n"
+        "Be conservative. Do not convert opinion into real position disclosure.\n"
         "Ignore posts without a ticker.\n"
         f"Posts:\n{json.dumps(payload_posts, ensure_ascii=False)}"
     )
@@ -148,39 +117,49 @@ def extract_claims_by_llm(posts: list[PostRecord], llm_config: dict[str, Any]) -
             post = post_map.get(item.get("post_id", ""))
             if not post:
                 continue
-            ticker = str(item.get("ticker", "")).replace("$", "").upper().strip()
-            if not ticker:
+            raw_text = f"{post.title}\n{post.text}".strip()
+            original_ticker_text = str(item.get("original_ticker_text", "")).strip().replace("$", "")
+            canonical_ticker = infer_canonical_ticker(original_ticker_text)
+            if not canonical_ticker:
                 continue
-            claims.append(
-                PositionClaim(
-                    post_id=post.post_id,
-                    source=post.source,
-                    author=post.author,
-                    url=post.url,
-                    ticker=ticker,
-                    stance=str(item.get("stance", "watch")).strip().lower(),
-                    confidence=float(item.get("confidence", 0.5)),
-                    evidence=str(item.get("evidence", ""))[:280],
-                    published_at=post.published_at,
-                    extractor="llm",
-                )
-            )
-        return claims, None
+            raw_claim = {
+                "ticker": canonical_ticker,
+                "original_ticker_text": original_ticker_text,
+                "canonical_ticker": canonical_ticker,
+                "action": str(item.get("action", "观察")).strip() or "观察",
+                "evidence": str(item.get("evidence", ""))[:280],
+                "confidence": float(item.get("confidence", 0.5)),
+                "confidence_reason": str(item.get("confidence_reason", "")),
+                "claim_type": str(item.get("claim_type", "unknown")).strip() or "unknown",
+                "position_confidence": float(item.get("position_confidence", 0.0)),
+                "is_position_disclosure": bool(item.get("is_position_disclosure", False)),
+                "source": normalize_source(post.source),
+                "source_url": post.url,
+                "author": post.author,
+                "published_at": post.published_at,
+                "captured_at": post.fetched_at,
+                "raw_text": raw_text,
+                "language": detect_language(raw_text),
+                "post_id": post.post_id,
+                "extractor": "llm",
+            }
+            normalized = normalize_claim_dict(raw_claim, fallback_captured_at=post.fetched_at)
+            claims.append(PositionClaim(**normalized))
+        return merge_claims([], claims), None
     except Exception as exc:
         return [], f"LLM 抽取失败: {exc}"
 
 
 def merge_claims(rule_claims: list[PositionClaim], llm_claims: list[PositionClaim]) -> list[PositionClaim]:
-    merged: dict[tuple[str, str], PositionClaim] = {}
+    merged: dict[str, PositionClaim] = {}
     for claim in rule_claims:
-        merged[(claim.post_id, claim.ticker)] = claim
+        merged[claim.claim_hash] = claim
     for claim in llm_claims:
-        key = (claim.post_id, claim.ticker)
-        existing = merged.get(key)
+        existing = merged.get(claim.claim_hash)
         if existing is None or claim.confidence >= existing.confidence:
-            merged[key] = claim
+            merged[claim.claim_hash] = claim
     return sorted(
         merged.values(),
-        key=lambda item: (item.confidence, item.ticker, item.post_id),
+        key=lambda item: (item.confidence, item.canonical_ticker, item.captured_at),
         reverse=True,
     )
