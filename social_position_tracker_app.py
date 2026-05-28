@@ -18,6 +18,14 @@ def _split_lines(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
+def _display_author(value: str) -> str:
+    return value if value else "未识别作者"
+
+
+def _format_bool_zh(value: Any) -> str:
+    return "是" if bool(value) else "否"
+
+
 def _claims_df(claims: list[dict[str, Any]]) -> pd.DataFrame:
     if not claims:
         return pd.DataFrame(
@@ -47,11 +55,13 @@ def _claims_df(claims: list[dict[str, Any]]) -> pd.DataFrame:
             "is_position_disclosure",
             "author",
             "source",
+            "discovery_source",
             "source_url",
             "evidence",
             "language",
         ]
     ]
+    df["author"] = df["author"].apply(_display_author)
     df = df.rename(
         columns={
             "canonical_ticker": "标准Ticker",
@@ -63,6 +73,7 @@ def _claims_df(claims: list[dict[str, Any]]) -> pd.DataFrame:
             "is_position_disclosure": "明确披露",
             "author": "作者",
             "source": "来源",
+            "discovery_source": "发现来源",
             "source_url": "链接",
             "evidence": "证据",
             "language": "语言",
@@ -76,6 +87,101 @@ def _posts_df(posts: list[dict[str, Any]]) -> pd.DataFrame:
         return pd.DataFrame(columns=["source", "author", "title", "text", "url"])
     df = pd.DataFrame(posts)
     return df[["source", "author", "title", "text", "url"]].rename(columns={"source": "来源", "author": "作者", "title": "标题", "text": "正文", "url": "链接"})
+
+
+def _claims_export_df(claims: list[dict[str, Any]]) -> pd.DataFrame:
+    if not claims:
+        return pd.DataFrame(
+            columns=[
+                "来源",
+                "发现来源",
+                "作者",
+                "标准标的",
+                "原文标的",
+                "动作",
+                "信号类型",
+                "是否明确披露仓位",
+                "仓位置信度",
+                "整体置信度",
+                "置信度原因",
+                "原文证据",
+                "来源链接",
+                "原文发布时间",
+                "抓取时间",
+                "语言",
+                "去重ID",
+            ]
+        )
+    df = pd.DataFrame(claims).copy()
+    for column in [
+        "source",
+        "discovery_source",
+        "author",
+        "canonical_ticker",
+        "original_ticker_text",
+        "action",
+        "claim_type",
+        "is_position_disclosure",
+        "position_confidence",
+        "confidence",
+        "confidence_reason",
+        "evidence",
+        "source_url",
+        "published_at",
+        "captured_at",
+        "language",
+        "claim_hash",
+    ]:
+        if column not in df.columns:
+            df[column] = ""
+    df = df[
+        [
+            "source",
+            "discovery_source",
+            "author",
+            "canonical_ticker",
+            "original_ticker_text",
+            "action",
+            "claim_type",
+            "is_position_disclosure",
+            "position_confidence",
+            "confidence",
+            "confidence_reason",
+            "evidence",
+            "source_url",
+            "published_at",
+            "captured_at",
+            "language",
+            "claim_hash",
+        ]
+    ]
+    df["author"] = df["author"].apply(_display_author)
+    df["discovery_source"] = df["discovery_source"].fillna("")
+    df["is_position_disclosure"] = df["is_position_disclosure"].apply(_format_bool_zh)
+    df["position_confidence"] = pd.to_numeric(df["position_confidence"], errors="coerce").fillna(0.0).map(lambda v: f"{v:.2f}")
+    df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce").fillna(0.0).map(lambda v: f"{v:.2f}")
+    df = df.rename(
+        columns={
+            "source": "来源",
+            "discovery_source": "发现来源",
+            "author": "作者",
+            "canonical_ticker": "标准标的",
+            "original_ticker_text": "原文标的",
+            "action": "动作",
+            "claim_type": "信号类型",
+            "is_position_disclosure": "是否明确披露仓位",
+            "position_confidence": "仓位置信度",
+            "confidence": "整体置信度",
+            "confidence_reason": "置信度原因",
+            "evidence": "原文证据",
+            "source_url": "来源链接",
+            "published_at": "原文发布时间",
+            "captured_at": "抓取时间",
+            "language": "语言",
+            "claim_hash": "去重ID",
+        }
+    )
+    return df
 
 
 def _changes_df(changes: list[dict[str, Any]]) -> pd.DataFrame:
@@ -94,6 +200,7 @@ def _changes_df(changes: list[dict[str, Any]]) -> pd.DataFrame:
             ]
         )
     df = pd.DataFrame(changes)
+    df["author"] = df["author"].apply(_display_author)
     change_map = {
         "upgraded": "观点升温",
         "downgraded": "观点降温",
@@ -146,6 +253,7 @@ def _author_position_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
             ]
         )
     df = pd.DataFrame(rows)
+    df["author"] = df["author"].apply(_display_author)
     df = df[
         [
             "author",
@@ -155,6 +263,7 @@ def _author_position_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
             "is_position_disclosure",
             "position_confidence",
             "latest_evidence",
+            "discovery_source",
             "source_url",
             "latest_captured_at",
         ]
@@ -168,6 +277,7 @@ def _author_position_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
             "is_position_disclosure": "是否明确披露",
             "position_confidence": "仓位置信度",
             "latest_evidence": "最新证据",
+            "discovery_source": "发现来源",
             "source_url": "来源链接",
             "latest_captured_at": "更新时间",
         }
@@ -405,7 +515,24 @@ if latest_snapshot:
         )
 
     st.subheader("持仓线索表")
-    claims_df = _claims_df(latest_snapshot.get("claims", []))
+    filtered_claims = _apply_common_filters(
+        latest_snapshot.get("claims", []),
+        author_value=filter_author,
+        ticker_value=filter_ticker,
+        source_value=filter_source,
+        language_value=filter_language,
+    )
+    if filter_claim_type != "全部":
+        filtered_claims = [claim for claim in filtered_claims if claim.get("claim_type", "") == filter_claim_type]
+    claims_df = _claims_df(filtered_claims)
+    export_df = _claims_export_df(filtered_claims)
+    st.download_button(
+        "导出当前线索 CSV",
+        data=export_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name="social_position_tracker_claims.csv",
+        mime="text/csv",
+        use_container_width=False,
+    )
     st.dataframe(
         claims_df,
         use_container_width=True,
