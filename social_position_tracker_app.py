@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import urllib.parse
 from typing import Any
 
 import pandas as pd
@@ -22,7 +23,8 @@ TIME_RANGE_OPTIONS = {
     "最近 30 天": 30,
     "不限制": None,
 }
-DEFAULT_PLATFORMS = ["X", "Reddit", "Web/Search"]
+DEFAULT_ENABLED_PLATFORMS = ["X", "Reddit", "Substack", "Seeking Alpha", "Web/Search"]
+PLATFORM_OPTIONS = ["X", "Reddit", "Substack", "Seeking Alpha", "Medium", "Stocktwits", "YouTube", "Web/Search"]
 
 
 def _split_lines(text: str) -> list[str]:
@@ -84,20 +86,96 @@ def _within_time_range(row: dict[str, Any], time_range_label: str, preferred: li
     return False
 
 
-def _extract_handle(user_input: str) -> tuple[str, str]:
+def parse_author_input(user_input: str) -> dict[str, Any]:
     text = (user_input or "").strip()
+    info = {
+        "author_query": text,
+        "primary_handle": "",
+        "platform_hint": "keyword",
+        "direct_url": "",
+        "author_aliases": [],
+        "domain_hint": "",
+    }
     if not text:
-        return "", ""
-    x_match = re.search(r"(?:https?://)?(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,20})", text, flags=re.IGNORECASE)
-    if x_match:
-        return x_match.group(1), "x"
-    reddit_match = re.search(r"(?:https?://)?(?:www\.)?reddit\.com/(?:user|u)/([A-Za-z0-9_\-]+)", text, flags=re.IGNORECASE)
-    if reddit_match:
-        return reddit_match.group(1), "reddit"
-    cleaned = text.lstrip("@").strip()
-    if re.fullmatch(r"[A-Za-z0-9_]{1,30}", cleaned):
-        return cleaned, "handle"
-    return text, "keyword"
+        return info
+
+    if text.startswith(("http://", "https://")):
+        info["direct_url"] = text
+        parsed = urllib.parse.urlparse(text)
+        domain = parsed.netloc.lower().removeprefix("www.")
+        info["domain_hint"] = domain
+        path = parsed.path.rstrip("/")
+
+        x_match = re.search(r"/([A-Za-z0-9_]{1,20})(?:/status/\d+)?/?$", path, flags=re.IGNORECASE)
+        if domain in {"x.com", "twitter.com"} and x_match:
+            handle = x_match.group(1)
+            if handle.lower() not in {"search", "home", "explore", "login", "signup", "i", "intent", "share"}:
+                info["primary_handle"] = handle
+                info["platform_hint"] = "x"
+        reddit_match = re.search(r"/(?:user|u)/([A-Za-z0-9_-]+)", path, flags=re.IGNORECASE)
+        if domain.endswith("reddit.com") and reddit_match:
+            info["primary_handle"] = reddit_match.group(1)
+            info["platform_hint"] = "reddit"
+        substack_domain = re.match(r"^([A-Za-z0-9-]+)\.substack\.com$", domain, flags=re.IGNORECASE)
+        if substack_domain:
+            info["primary_handle"] = substack_domain.group(1)
+            info["platform_hint"] = "substack"
+        substack_at = re.search(r"/@([A-Za-z0-9_-]+)", path, flags=re.IGNORECASE)
+        if domain.endswith("substack.com") and substack_at:
+            info["primary_handle"] = substack_at.group(1)
+            info["platform_hint"] = "substack"
+        sa_match = re.search(r"/author/([A-Za-z0-9_-]+)", path, flags=re.IGNORECASE)
+        if domain.endswith("seekingalpha.com") and sa_match:
+            info["primary_handle"] = sa_match.group(1)
+            info["platform_hint"] = "seeking_alpha"
+        medium_at = re.search(r"/@([A-Za-z0-9_-]+)", path, flags=re.IGNORECASE)
+        medium_subdomain = re.match(r"^([A-Za-z0-9-]+)\.medium\.com$", domain, flags=re.IGNORECASE)
+        if domain.endswith("medium.com") and medium_at:
+            info["primary_handle"] = medium_at.group(1)
+            info["platform_hint"] = "medium"
+        elif medium_subdomain:
+            info["primary_handle"] = medium_subdomain.group(1)
+            info["platform_hint"] = "medium"
+        stocktwits_match = re.search(r"/([A-Za-z0-9_]+)$", path, flags=re.IGNORECASE)
+        if domain.endswith("stocktwits.com") and stocktwits_match:
+            info["primary_handle"] = stocktwits_match.group(1)
+            info["platform_hint"] = "stocktwits"
+        youtube_handle = re.search(r"/@([A-Za-z0-9_.-]+)", path, flags=re.IGNORECASE)
+        youtube_channel = re.search(r"/channel/([A-Za-z0-9_-]+)", path, flags=re.IGNORECASE)
+        if domain.endswith("youtube.com") and youtube_handle:
+            info["primary_handle"] = youtube_handle.group(1)
+            info["platform_hint"] = "youtube"
+        elif domain.endswith("youtube.com") and youtube_channel:
+            info["primary_handle"] = youtube_channel.group(1)
+            info["platform_hint"] = "youtube"
+        elif domain.endswith("youtu.be") and path.strip("/"):
+            info["primary_handle"] = path.strip("/")
+            info["platform_hint"] = "youtube"
+        elif info["platform_hint"] == "keyword":
+            info["platform_hint"] = "web"
+    else:
+        cleaned = text.lstrip("@").strip()
+        if re.fullmatch(r"[A-Za-z0-9_]{1,30}", cleaned):
+            info["primary_handle"] = cleaned
+            info["platform_hint"] = "handle"
+
+    primary = info["primary_handle"] or text.lstrip("@").strip()
+    aliases = [text, primary]
+    if primary:
+        aliases.extend(
+            [
+                f"@{primary}",
+                f"x.com/{primary}",
+                f"twitter.com/{primary}",
+                f"reddit.com/user/{primary}",
+                f"stocktwits.com/{primary}",
+                f"youtube.com/@{primary}",
+            ]
+        )
+    if info["domain_hint"]:
+        aliases.append(info["domain_hint"])
+    info["author_aliases"] = _unique([alias for alias in aliases if alias])
+    return info
 
 
 def _unique(items: list[str]) -> list[str]:
@@ -111,38 +189,234 @@ def _unique(items: list[str]) -> list[str]:
     return result
 
 
-def _build_queries(user_input: str, handle: str, input_kind: str) -> list[str]:
-    identity = (handle or user_input.strip().lstrip("@")).strip()
-    if not identity:
-        return []
-    if input_kind in {"x", "handle"} and handle:
-        queries = [
-            f'site:x.com/{handle}/status "I have" "$"',
-            f'site:x.com/{handle}/status "position" "$"',
-            f'site:x.com/{handle}/status "positions" "$"',
-            f'site:x.com/{handle}/status "taken a position" "$"',
-            f'site:x.com/{handle}/status "highest concentration" "$"',
-            f'site:x.com/{handle}/status "no positions" "$"',
-            f'site:x.com/{handle}/status "trimmed" "$"',
-            f'site:x.com/{handle}/status "sold" "$"',
-            f'site:x.com/{handle}/status "Long" "$"',
-            f'site:x.com/{handle}/status "hold my positions" "$"',
-            f'site:x.com/{handle}/status "portfolio" "$"',
-            f'site:x.com/{handle}/status "new position" "$"',
-            f"site:reddit.com {handle} bought added holding sold position",
-            f"{handle} 买入 加仓 持有 卖出 清仓",
-            f"{handle} 持仓 组合 观点 股票",
-            f"{handle} 空仓 观察 减仓",
-            f"{handle} stocks portfolio positions holdings",
-        ]
-    else:
-        queries = [
-            f"{identity} 买入 加仓 持有 卖出 清仓",
-            f"{identity} 持仓 组合 观点 股票",
-            f"{identity} 空仓 观察 减仓",
-            f"{identity} position portfolio bought sold holding",
-        ]
-    return _unique(queries)
+def _unique_query_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    result: list[dict[str, str]] = []
+    for item in items:
+        query = str(item.get("query", "")).strip()
+        platform = str(item.get("platform", "search")).strip() or "search"
+        key = (platform, query)
+        if not query or key in seen:
+            continue
+        seen.add(key)
+        result.append({"platform": platform, "query": query})
+    return result
+
+
+def _unique_url_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    result: list[dict[str, str]] = []
+    for item in items:
+        url = str(item.get("url", "")).strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        result.append(item)
+    return result
+
+
+def _platform_caps(per_platform_limit: int) -> dict[str, int]:
+    return {
+        "x": max(per_platform_limit, min(per_platform_limit * 2, 40)),
+        "reddit": per_platform_limit,
+        "substack": min(per_platform_limit, 10),
+        "seeking_alpha": min(per_platform_limit, 10),
+        "medium": min(per_platform_limit, 10),
+        "stocktwits": per_platform_limit,
+        "youtube": min(per_platform_limit, 10),
+        "search": min(per_platform_limit, 10),
+        "web": min(per_platform_limit, 10),
+    }
+
+
+def build_multiplatform_author_queries(
+    author_info: dict[str, Any],
+    selected_platforms: list[str],
+    per_platform_limit: int,
+) -> dict[str, Any]:
+    primary = (author_info.get("primary_handle", "") or author_info.get("author_query", "")).strip().lstrip("@")
+    platform_hint = author_info.get("platform_hint", "keyword")
+    direct_url = author_info.get("direct_url", "").strip()
+    domain_hint = author_info.get("domain_hint", "").strip()
+
+    x_profiles: list[str] = []
+    x_status_urls: list[str] = []
+    reddit_users: list[str] = []
+    web_urls: list[dict[str, str]] = []
+    search_queries: list[dict[str, str]] = []
+    caps = _platform_caps(per_platform_limit)
+
+    def add_queries(platform: str, queries: list[str]) -> None:
+        search_queries.extend({"platform": platform, "query": query} for query in queries if query.strip())
+
+    if "X" in selected_platforms and primary:
+        x_profiles.append(primary)
+        x_status_urls.append(f"https://x.com/{primary}/with_replies")
+        add_queries(
+            "x",
+            [
+                f'site:x.com/{primary}/status "$"',
+                f'site:x.com/{primary}/status "I have" "$"',
+                f'site:x.com/{primary}/status "position" "$"',
+                f'site:x.com/{primary}/status "positions" "$"',
+                f'site:x.com/{primary}/status "taken a position" "$"',
+                f'site:x.com/{primary}/status "new position" "$"',
+                f'site:x.com/{primary}/status "highest concentration" "$"',
+                f'site:x.com/{primary}/status "no positions" "$"',
+                f'site:x.com/{primary}/status "trimmed" "$"',
+                f'site:x.com/{primary}/status "sold" "$"',
+                f'site:x.com/{primary}/status "Long" "$"',
+                f'site:x.com/{primary}/status "hold my positions" "$"',
+            ],
+        )
+        if direct_url and author_info.get("platform_hint") == "x":
+            if "/status/" in direct_url.lower():
+                x_status_urls.append(direct_url)
+
+    if "Reddit" in selected_platforms and primary:
+        reddit_users.append(primary)
+        add_queries(
+            "reddit",
+            [
+                f'site:reddit.com "{primary}" "$"',
+                f'site:reddit.com "{primary}" "position"',
+                f'site:reddit.com "{primary}" "positions"',
+                f'site:reddit.com "{primary}" "portfolio"',
+                f'site:reddit.com "{primary}" "holding"',
+                f'site:reddit.com "{primary}" "bought"',
+                f'site:reddit.com "{primary}" "sold"',
+                f'site:reddit.com "{primary}" "trimmed"',
+            ],
+        )
+        if direct_url and platform_hint == "reddit":
+            web_urls.append({"url": direct_url, "platform": "reddit", "discovery_source": "manual"})
+
+    if "Substack" in selected_platforms:
+        if direct_url and (platform_hint == "substack" or domain_hint.endswith("substack.com")):
+            web_urls.append({"url": direct_url, "platform": "substack", "discovery_source": "manual"})
+        if domain_hint.endswith("substack.com") and domain_hint:
+            add_queries(
+                "substack",
+                [
+                    f'site:{domain_hint} "$"',
+                    f'site:{domain_hint} "portfolio"',
+                    f'site:{domain_hint} "position"',
+                    f'site:{domain_hint} "holdings"',
+                    f'site:{domain_hint} "I own"',
+                    f'site:{domain_hint} "I bought"',
+                    f'site:{domain_hint} "I sold"',
+                ],
+            )
+        elif primary:
+            add_queries(
+                "substack",
+                [
+                    f'site:substack.com "{primary}" "$"',
+                    f'site:substack.com "{primary}" "portfolio"',
+                    f'site:substack.com "{primary}" "position"',
+                    f'site:substack.com "{primary}" "positions"',
+                    f'site:substack.com "{primary}" "holdings"',
+                    f'site:substack.com "{primary}" "I own"',
+                    f'site:substack.com "{primary}" "I bought"',
+                    f'site:substack.com "{primary}" "I sold"',
+                ],
+            )
+
+    if "Seeking Alpha" in selected_platforms:
+        if direct_url and (platform_hint == "seeking_alpha" or domain_hint.endswith("seekingalpha.com")):
+            web_urls.append({"url": direct_url, "platform": "seeking_alpha", "discovery_source": "manual"})
+        if platform_hint == "seeking_alpha" and primary:
+            add_queries(
+                "seeking_alpha",
+                [
+                    f'site:seekingalpha.com/author/{primary} "Disclosure"',
+                    f'site:seekingalpha.com/author/{primary} "long position"',
+                    f'site:seekingalpha.com/author/{primary} "no position"',
+                    f'site:seekingalpha.com/author/{primary} "$"',
+                ],
+            )
+        elif primary:
+            add_queries(
+                "seeking_alpha",
+                [
+                    f'site:seekingalpha.com "{primary}" "Disclosure"',
+                    f'site:seekingalpha.com "{primary}" "I/we have"',
+                    f'site:seekingalpha.com "{primary}" "long position"',
+                    f'site:seekingalpha.com "{primary}" "no position"',
+                    f'site:seekingalpha.com "{primary}" "$"',
+                ],
+            )
+
+    if "Medium" in selected_platforms:
+        if direct_url and (platform_hint == "medium" or domain_hint.endswith("medium.com")):
+            web_urls.append({"url": direct_url, "platform": "medium", "discovery_source": "manual"})
+        if primary:
+            add_queries(
+                "medium",
+                [
+                    f'site:medium.com "{primary}" "$"',
+                    f'site:medium.com "{primary}" "portfolio"',
+                    f'site:medium.com "{primary}" "position"',
+                    f'site:medium.com "{primary}" "I own"',
+                    f'site:medium.com "{primary}" "I bought"',
+                    f'site:medium.com "{primary}" "I sold"',
+                ],
+            )
+
+    if "Stocktwits" in selected_platforms and primary:
+        if direct_url and (platform_hint == "stocktwits" or domain_hint.endswith("stocktwits.com")):
+            web_urls.append({"url": direct_url, "platform": "stocktwits", "discovery_source": "manual"})
+        add_queries(
+            "stocktwits",
+            [
+                f'site:stocktwits.com/{primary} "$"',
+                f'site:stocktwits.com/{primary} "bullish"',
+                f'site:stocktwits.com/{primary} "bearish"',
+                f'site:stocktwits.com/{primary} "long"',
+                f'site:stocktwits.com/{primary} "holding"',
+                f'site:stocktwits.com/{primary} "sold"',
+            ],
+        )
+
+    if "YouTube" in selected_platforms:
+        if direct_url and (platform_hint == "youtube" or domain_hint.endswith("youtube.com") or domain_hint.endswith("youtu.be")):
+            web_urls.append({"url": direct_url, "platform": "youtube", "discovery_source": "manual"})
+        if primary:
+            add_queries(
+                "youtube",
+                [
+                    f'site:youtube.com "{primary}" "$"',
+                    f'site:youtube.com "{primary}" "portfolio"',
+                    f'site:youtube.com "{primary}" "holdings"',
+                    f'site:youtube.com "{primary}" "stocks"',
+                    f'site:youtube.com "{primary}" "position"',
+                ],
+            )
+
+    if "Web/Search" in selected_platforms and primary:
+        if direct_url and platform_hint not in {"x", "reddit"}:
+            web_urls.append({"url": direct_url, "platform": "web", "discovery_source": "manual"})
+        add_queries(
+            "search",
+            [
+                f'"{primary}" "$"',
+                f'"{primary}" "portfolio"',
+                f'"{primary}" "positions"',
+                f'"{primary}" "holdings"',
+                f'"{primary}" "I own"',
+                f'"{primary}" "I bought"',
+                f'"{primary}" "I sold"',
+            ],
+        )
+
+    return {
+        "x_profiles": _unique(x_profiles),
+        "x_status_urls": _unique(x_status_urls),
+        "reddit_users": _unique(reddit_users),
+        "web_urls": _unique_url_items(web_urls),
+        "search_queries": _unique_query_items(search_queries),
+        "search_platform_caps": caps,
+    }
 
 
 def _build_run_config(
@@ -155,43 +429,25 @@ def _build_run_config(
     llm_base_url: str,
     llm_model: str,
 ) -> dict[str, Any]:
-    handle, input_kind = _extract_handle(query_input)
-    query_input = query_input.strip()
-    x_profiles: list[str] = []
-    x_status_urls: list[str] = []
-    reddit_users: list[str] = []
-    web_urls: list[str] = []
-    search_queries: list[str] = []
-
-    if "X" in platforms:
-        if input_kind in {"x", "handle"} and handle and "/status/" not in query_input:
-            x_profiles.append(handle)
-            x_status_urls.append(f"https://x.com/{handle}/with_replies")
-        if input_kind == "x" and "/status/" in query_input.lower():
-            x_status_urls.append(query_input)
-            if handle:
-                x_profiles.append(handle)
-                x_status_urls.append(f"https://x.com/{handle}/with_replies")
-
-    if "Reddit" in platforms and handle and input_kind in {"reddit", "handle"}:
-        reddit_users.append(handle)
-
-    if "Web/Search" in platforms:
-        if query_input.startswith(("http://", "https://")) and input_kind not in {"x", "reddit"}:
-            web_urls.append(query_input)
-        search_queries.extend(_build_queries(query_input, handle, input_kind))
-
-    search_queries.extend(custom_queries)
+    author_info = parse_author_input(query_input)
+    generated = build_multiplatform_author_queries(author_info, platforms, post_limit)
+    search_queries = list(generated["search_queries"])
+    search_queries.extend({"platform": "search", "query": query} for query in custom_queries if query.strip())
+    focus_handle = author_info.get("primary_handle", "") if author_info.get("platform_hint") != "web" else ""
 
     return {
-        "target_name": handle or query_input,
-        "focus_handle": handle if input_kind in {"x", "handle"} and handle else "",
-        "aliases": _unique([query_input, handle]),
-        "x_profiles": _unique(x_profiles),
-        "x_status_urls": _unique(x_status_urls),
-        "reddit_users": _unique(reddit_users),
-        "web_urls": _unique(web_urls),
-        "search_queries": _unique(search_queries),
+        "target_name": author_info.get("primary_handle") or author_info.get("author_query") or query_input.strip(),
+        "focus_handle": focus_handle,
+        "focus_aliases": author_info.get("author_aliases", []),
+        "focus_domain": author_info.get("domain_hint", ""),
+        "focus_direct_url": author_info.get("direct_url", ""),
+        "aliases": author_info.get("author_aliases", []),
+        "x_profiles": generated["x_profiles"],
+        "x_status_urls": generated["x_status_urls"],
+        "reddit_users": generated["reddit_users"],
+        "web_urls": generated["web_urls"],
+        "search_queries": _unique_query_items(search_queries),
+        "search_platform_caps": generated["search_platform_caps"],
         "post_limit": post_limit,
         "llm": {
             "enabled": llm_enabled,
@@ -454,7 +710,7 @@ latest_snapshot = snapshots[-1] if snapshots else None
 all_claims = flatten_claims_from_snapshots(snapshots, dedupe=True)
 author_position_rows = build_author_position_summary(all_claims)
 
-default_query = config.get("x_profiles", [""])[0] if config.get("x_profiles") else config.get("target_name", "")
+default_query = config.get("focus_direct_url", "") or (config.get("x_profiles", [""])[0] if config.get("x_profiles") else config.get("target_name", ""))
 
 st.title("🛰️ 社交持仓雷达")
 st.caption("输入一个作者主页或关键词，自动追踪其公开社媒观点、疑似持仓动作和最新变化。")
@@ -470,7 +726,11 @@ with st.container(border=True):
         )
         form_col1, form_col2 = st.columns([1.2, 1])
         with form_col1:
-            selected_platforms = st.multiselect("可选平台", DEFAULT_PLATFORMS, default=st.session_state.get("selected_platforms", DEFAULT_PLATFORMS))
+            selected_platforms = st.multiselect(
+                "可选平台",
+                PLATFORM_OPTIONS,
+                default=st.session_state.get("selected_platforms", DEFAULT_ENABLED_PLATFORMS),
+            )
             selected_time_range = st.selectbox(
                 "时间范围",
                 list(TIME_RANGE_OPTIONS.keys()),

@@ -5,6 +5,7 @@ import json
 import re
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 
@@ -19,6 +20,15 @@ ASCII_TOKEN_RE = re.compile(r"^[A-Za-z0-9 .&+\-]+$")
 X_AUTHOR_RE = re.compile(r"(?:https?://)?(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,20})(?:/|$)", re.IGNORECASE)
 URL_SOURCE_X_RE = re.compile(r"URL Source:\s*https?://(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,20})(?:/|$)", re.IGNORECASE)
 REDDIT_USER_RE = re.compile(r"(?:https?://)?(?:www\.)?reddit\.com/(?:user|u)/([A-Za-z0-9_\-]+)(?:/|$)", re.IGNORECASE)
+SUBSTACK_DOMAIN_RE = re.compile(r"(?:https?://)?([A-Za-z0-9-]+)\.substack\.com(?:/|$)", re.IGNORECASE)
+SUBSTACK_AT_RE = re.compile(r"(?:https?://)?(?:www\.)?substack\.com/@([A-Za-z0-9_-]+)(?:/|$)", re.IGNORECASE)
+SEEKING_ALPHA_AUTHOR_RE = re.compile(r"(?:https?://)?(?:www\.)?seekingalpha\.com/author/([A-Za-z0-9_-]+)(?:/|$)", re.IGNORECASE)
+MEDIUM_AT_RE = re.compile(r"(?:https?://)?(?:www\.)?medium\.com/@([A-Za-z0-9_-]+)(?:/|$)", re.IGNORECASE)
+MEDIUM_SUBDOMAIN_RE = re.compile(r"(?:https?://)?([A-Za-z0-9-]+)\.medium\.com(?:/|$)", re.IGNORECASE)
+STOCKTWITS_RE = re.compile(r"(?:https?://)?(?:www\.)?stocktwits\.com/([A-Za-z0-9_]+)(?:/|$)", re.IGNORECASE)
+YOUTUBE_HANDLE_RE = re.compile(r"(?:https?://)?(?:www\.)?youtube\.com/@([A-Za-z0-9_.-]+)(?:/|$)", re.IGNORECASE)
+YOUTUBE_CHANNEL_RE = re.compile(r"(?:https?://)?(?:www\.)?youtube\.com/channel/([A-Za-z0-9_-]+)(?:/|$)", re.IGNORECASE)
+YOUTU_BE_RE = re.compile(r"(?:https?://)?youtu\.be/([A-Za-z0-9_-]+)(?:/|$)", re.IGNORECASE)
 
 ACTION_PRIORITY = {
     "空仓": 0,
@@ -279,7 +289,26 @@ US_TICKER_STOPWORDS = {
     "ATM",
     "SBC",
 }
-X_RESERVED_PATHS = {"search", "i", "intent", "share", "home", "explore", "login", "signup", "tos", "privacy"}
+X_RESERVED_PATHS = {
+    "search",
+    "i",
+    "intent",
+    "share",
+    "home",
+    "explore",
+    "login",
+    "signup",
+    "tos",
+    "privacy",
+    "watch",
+    "shorts",
+    "results",
+    "p",
+    "article",
+    "news",
+    "tag",
+    "terms",
+}
 NOISE_PHRASES = [
     "sign up with apple",
     "create account",
@@ -347,6 +376,34 @@ def parse_author_from_url_or_text(source_url: str, raw_text: str) -> str:
     reddit_match = REDDIT_USER_RE.search(f"{url}\n{text}")
     if reddit_match:
         return reddit_match.group(1).strip()
+    for pattern in (SUBSTACK_AT_RE, SUBSTACK_DOMAIN_RE):
+        match = pattern.search(f"{url}\n{text}")
+        if match:
+            candidate = match.group(1).strip()
+            if candidate.lower() not in X_RESERVED_PATHS:
+                return candidate
+    sa_match = SEEKING_ALPHA_AUTHOR_RE.search(f"{url}\n{text}")
+    if sa_match:
+        candidate = sa_match.group(1).strip()
+        if candidate.lower() not in X_RESERVED_PATHS:
+            return candidate
+    for pattern in (MEDIUM_AT_RE, MEDIUM_SUBDOMAIN_RE):
+        match = pattern.search(f"{url}\n{text}")
+        if match:
+            candidate = match.group(1).strip()
+            if candidate.lower() not in X_RESERVED_PATHS:
+                return candidate
+    st_match = STOCKTWITS_RE.search(f"{url}\n{text}")
+    if st_match:
+        candidate = st_match.group(1).strip()
+        if candidate.lower() not in X_RESERVED_PATHS:
+            return candidate
+    for pattern in (YOUTUBE_HANDLE_RE, YOUTUBE_CHANNEL_RE):
+        match = pattern.search(f"{url}\n{text}")
+        if match:
+            candidate = match.group(1).strip()
+            if candidate.lower() not in X_RESERVED_PATHS:
+                return candidate
     return ""
 
 
@@ -354,36 +411,77 @@ def normalize_handle(value: str) -> str:
     return (value or "").strip().lstrip("@").lower()
 
 
-def is_post_relevant_to_handle(source_url: str, raw_text: str, post_author: str, focus_handle: str) -> bool:
+def _normalize_domain(value: str) -> str:
+    domain = (value or "").strip().lower()
+    if not domain:
+        return ""
+    parsed = urlparse(domain if "://" in domain else f"https://{domain}")
+    host = parsed.netloc or parsed.path
+    return host.removeprefix("www.")
+
+
+def is_post_relevant_to_handle(
+    source_url: str,
+    raw_text: str,
+    post_author: str,
+    focus_handle: str,
+    focus_aliases: list[str] | None = None,
+    focus_domain: str = "",
+    focus_direct_url: str = "",
+) -> bool:
     handle = normalize_handle(focus_handle)
-    if not handle:
-        return True
-    combined_url = (source_url or "").lower()
-    combined_text = (raw_text or "").lower()
+    aliases = [alias.strip().lower() for alias in (focus_aliases or []) if alias and alias.strip()]
+    url_lower = (source_url or "").lower()
+    text_lower = (raw_text or "").lower()
     parsed_author = normalize_handle(parse_author_from_url_or_text(source_url, raw_text))
     existing_author = normalize_handle(post_author)
-    return any(
-        [
-            f"x.com/{handle}" in combined_url,
-            f"x.com/{handle}" in combined_text,
-            handle in combined_text,
-            parsed_author == handle,
-            existing_author == handle,
-        ]
-    )
+    focus_domain_normalized = _normalize_domain(focus_domain)
+    focus_direct_url_normalized = (focus_direct_url or "").strip().lower().rstrip("/")
+
+    exact_author_candidates = {candidate for candidate in [parsed_author, existing_author] if candidate}
+    alias_author_candidates = {normalize_handle(alias) for alias in aliases if normalize_handle(alias)}
+    if alias_author_candidates and exact_author_candidates & alias_author_candidates:
+        return True
+    if handle and handle in {parsed_author, existing_author}:
+        return True
+    if handle and any(token in url_lower or token in text_lower for token in [handle, f"@{handle}", f"x.com/{handle}", f"twitter.com/{handle}"]):
+        return True
+    if any(alias in url_lower or alias in text_lower for alias in aliases):
+        return True
+    if focus_domain_normalized:
+        parsed_source_domain = _normalize_domain(source_url)
+        if parsed_source_domain == focus_domain_normalized or parsed_source_domain.endswith(f".{focus_domain_normalized}"):
+            return True
+    if focus_direct_url_normalized:
+        source_url_normalized = url_lower.rstrip("/")
+        if source_url_normalized == focus_direct_url_normalized or source_url_normalized.startswith(focus_direct_url_normalized):
+            return True
+    if not handle and not aliases and not focus_domain_normalized and not focus_direct_url_normalized:
+        return True
+    return False
 
 
 def infer_content_source(source: str, source_url: str, raw_text: str) -> str:
     combined = f"{source_url}\n{raw_text}".lower()
-    if "x.com/" in combined or "twitter.com/" in combined:
-        author = parse_author_from_url_or_text(source_url, raw_text)
-        if author:
-            return "x"
-    if "reddit.com/" in combined:
+    parsed = urlparse(source_url if "://" in (source_url or "") else f"https://{source_url}")
+    domain = (parsed.netloc or "").lower().removeprefix("www.")
+    if domain.endswith("x.com") or domain.endswith("twitter.com") or "x.com/" in combined or "twitter.com/" in combined:
+        return "x"
+    if domain.endswith("reddit.com") or "reddit.com/" in combined:
         return "reddit"
+    if domain.endswith("substack.com") or "substack.com" in combined:
+        return "substack"
+    if domain.endswith("seekingalpha.com") or "seekingalpha.com" in combined:
+        return "seeking_alpha"
+    if domain.endswith("medium.com") or "medium.com" in combined:
+        return "medium"
+    if domain.endswith("stocktwits.com") or "stocktwits.com" in combined:
+        return "stocktwits"
+    if domain.endswith("youtube.com") or domain.endswith("youtu.be") or "youtube.com" in combined or "youtu.be" in combined:
+        return "youtube"
     normalized = normalize_source(source)
     if normalized == "search":
-        return "web"
+        return "search" if domain.endswith("duckduckgo.com") or not domain else "web"
     return normalized
 
 
@@ -391,7 +489,11 @@ def infer_discovery_source(source: str, author: str) -> str:
     normalized = normalize_source(source)
     if normalized == "search" or author == "duckduckgo":
         return "duckduckgo"
-    return ""
+    if normalized in {"x", "reddit", "web"} or (source or "").startswith(("x_", "reddit_", "web_page")):
+        return "direct"
+    if normalized == "unknown":
+        return "unknown"
+    return "unknown"
 
 
 def is_noise_text(text: str) -> bool:

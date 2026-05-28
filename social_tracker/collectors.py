@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import re
 import urllib.parse
 from typing import Any
@@ -37,6 +38,20 @@ def _excerpt(title: str, text: str, limit: int = 800) -> str:
     return body[:limit]
 
 
+def _event_message(status: str, platform: str, target: str, detail: str) -> str:
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    return f"{status} | timestamp={timestamp} | platform={platform} | target={target} | {detail}"
+
+
+def _normalize_search_query_item(item: Any) -> dict[str, str]:
+    if isinstance(item, dict):
+        query = str(item.get("query", "")).strip()
+        platform = str(item.get("platform", "search")).strip() or "search"
+        return {"query": query, "platform": platform}
+    query = str(item or "").strip()
+    return {"query": query, "platform": "search"}
+
+
 def collect_reddit_user(username: str, limit: int = 8) -> tuple[list[PostRecord], list[str]]:
     posts: list[PostRecord] = []
     errors: list[str] = []
@@ -66,19 +81,34 @@ def collect_reddit_user(username: str, limit: int = 8) -> tuple[list[PostRecord]
                         title=_clean_text(title),
                         text=_excerpt(title, _clean_text(text)),
                         published_at=str(data.get("created_utc", "")),
-                        meta={"score": data.get("score"), "subreddit": data.get("subreddit", "")},
+                        meta={
+                            "score": data.get("score"),
+                            "subreddit": data.get("subreddit", ""),
+                            "discovery_source": "direct",
+                            "platform": "reddit",
+                        },
                     )
                 )
         except Exception as exc:
-            errors.append(f"Reddit {username} / {kind} 抓取失败: {exc}")
+            errors.append(_event_message("failed", "reddit", f"{username}/{kind}", f"error={exc}"))
     return posts, errors
 
 
-def collect_web_pages(urls: list[str]) -> tuple[list[PostRecord], list[str]]:
+def collect_web_pages(urls: list[Any]) -> tuple[list[PostRecord], list[str]]:
     posts: list[PostRecord] = []
     errors: list[str] = []
     session = _session()
-    for url in urls:
+    for item in urls:
+        if isinstance(item, dict):
+            url = str(item.get("url", "")).strip()
+            platform = str(item.get("platform", "web")).strip() or "web"
+            discovery_source = str(item.get("discovery_source", "manual")).strip() or "manual"
+        else:
+            url = str(item or "").strip()
+            platform = "web"
+            discovery_source = "manual"
+        if not url:
+            continue
         try:
             resp = session.get(url, timeout=20)
             resp.raise_for_status()
@@ -91,22 +121,42 @@ def collect_web_pages(urls: list[str]) -> tuple[list[PostRecord], list[str]]:
                 PostRecord(
                     post_id=f"web:{url}",
                     source="web_page",
-                    author=urllib.parse.urlparse(url).netloc,
-                    url=url,
-                    title=title,
-                    text=_excerpt(title, text),
+                        author=urllib.parse.urlparse(url).netloc,
+                        url=url,
+                        title=title,
+                        text=_excerpt(title, text),
+                        meta={"discovery_source": discovery_source, "platform": platform},
+                    )
                 )
-            )
         except Exception as exc:
-            errors.append(f"网页抓取失败 {url}: {exc}")
+            errors.append(_event_message("failed", platform, url, f"error={exc}"))
     return posts, errors
 
 
-def collect_search_results(queries: list[str], limit_per_query: int = 5) -> tuple[list[PostRecord], list[str]]:
+def collect_search_results(
+    queries: list[Any],
+    limit_per_query: int = 5,
+    platform_caps: dict[str, int] | None = None,
+) -> tuple[list[PostRecord], list[str]]:
     posts: list[PostRecord] = []
     errors: list[str] = []
     session = _session()
-    for query in queries:
+    platform_counts: dict[str, int] = {}
+    for item in queries:
+        query_item = _normalize_search_query_item(item)
+        query = query_item["query"]
+        platform = query_item["platform"]
+        if not query:
+            continue
+        cap = (platform_caps or {}).get(platform, limit_per_query)
+        current_count = platform_counts.get(platform, 0)
+        if current_count >= cap:
+            errors.append(_event_message("skipped", platform, query, f"warning=platform cap reached ({cap})"))
+            continue
+        remaining = max(cap - current_count, 0)
+        effective_limit = min(limit_per_query, remaining)
+        if effective_limit <= 0:
+            continue
         try:
             resp = session.get(
                 "https://html.duckduckgo.com/html/",
@@ -115,7 +165,10 @@ def collect_search_results(queries: list[str], limit_per_query: int = 5) -> tupl
             )
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
-            results = soup.select(".result")[:limit_per_query]
+            results = soup.select(".result")[:effective_limit]
+            if not results:
+                errors.append(_event_message("warning", platform, query, "warning=no public results"))
+                continue
             for idx, result in enumerate(results):
                 link = result.select_one(".result__a")
                 snippet = result.select_one(".result__snippet")
@@ -131,15 +184,16 @@ def collect_search_results(queries: list[str], limit_per_query: int = 5) -> tupl
                     PostRecord(
                         post_id=f"search:{query}:{idx}",
                         source="web_search",
-                        author="duckduckgo",
+                        author="",
                         url=target,
                         title=title,
                         text=_excerpt(title, text),
-                        meta={"query": query},
+                        meta={"query": query, "discovery_source": "duckduckgo", "platform": platform},
                     )
                 )
+                platform_counts[platform] = platform_counts.get(platform, 0) + 1
         except Exception as exc:
-            errors.append(f"搜索抓取失败 {query}: {exc}")
+            errors.append(_event_message("failed", platform, query, f"error={exc}"))
     return posts, errors
 
 
@@ -172,10 +226,11 @@ def collect_x_via_jina(
                     url=profile_url,
                     title=f"X profile snapshot: {username}",
                     text=_excerpt(f"X profile snapshot: {username}", _clean_text(text), limit=2500),
+                    meta={"discovery_source": "direct", "platform": "x"},
                 )
             )
         except Exception as exc:
-            errors.append(f"X 主页抓取失败 {username}: {exc}")
+            errors.append(_event_message("failed", "x", profile_url, f"error={exc}"))
 
     for status_url in status_urls or []:
         if not status_url:
@@ -191,10 +246,11 @@ def collect_x_via_jina(
                     url=status_url,
                     title=f"X status snapshot: {tail}",
                     text=_excerpt(f"X status snapshot: {tail}", _clean_text(text), limit=1800),
+                    meta={"discovery_source": "direct", "platform": "x"},
                 )
             )
         except Exception as exc:
-            errors.append(f"X 单帖抓取失败 {status_url}: {exc}")
+            errors.append(_event_message("failed", "x", status_url, f"error={exc}"))
 
     return posts, errors
 
@@ -222,7 +278,8 @@ def enrich_x_search_results(posts: list[PostRecord]) -> tuple[list[PostRecord], 
                 )
             )
         except Exception as exc:
-            errors.append(f"X 搜索结果增强失败 {post.url}: {exc}")
+            platform = str(post.meta.get("platform", "x")).strip() or "x"
+            errors.append(_event_message("failed", platform, post.url, f"error={exc}"))
             enriched.append(post)
     return enriched, errors
 
@@ -246,15 +303,20 @@ def collect_all(config: dict[str, Any]) -> tuple[list[PostRecord], list[str]]:
         posts.extend(batch)
         errors.extend(batch_errors)
 
-    web_urls = [url.strip() for url in config.get("web_urls", []) if url.strip()]
+    web_urls = config.get("web_urls", [])
     if web_urls:
         batch, batch_errors = collect_web_pages(web_urls)
         posts.extend(batch)
         errors.extend(batch_errors)
 
-    search_queries = [query.strip() for query in config.get("search_queries", []) if query.strip()]
+    search_queries = config.get("search_queries", [])
+    search_platform_caps = config.get("search_platform_caps", {})
     if search_queries:
-        batch, batch_errors = collect_search_results(search_queries, limit_per_query=min(limit, 5))
+        batch, batch_errors = collect_search_results(
+            search_queries,
+            limit_per_query=min(limit, 5),
+            platform_caps=search_platform_caps,
+        )
         batch, enrich_errors = enrich_x_search_results(batch)
         posts.extend(batch)
         errors.extend(batch_errors)

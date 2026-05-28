@@ -15,11 +15,22 @@ def run_pipeline(config: dict[str, Any]) -> dict[str, Any]:
     existing_hashes = {claim["claim_hash"] for claim in existing_claims}
     posts, errors = collect_all(config)
     focus_handle = config.get("focus_handle", "")
-    if focus_handle:
+    focus_aliases = config.get("focus_aliases", [])
+    focus_domain = config.get("focus_domain", "")
+    focus_direct_url = config.get("focus_direct_url", "")
+    if focus_handle or focus_aliases or focus_domain or focus_direct_url:
         posts = [
             post
             for post in posts
-            if is_post_relevant_to_handle(post.url, f"{post.title}\n{post.text}".strip(), post.author, focus_handle)
+            if is_post_relevant_to_handle(
+                post.url,
+                f"{post.title}\n{post.text}".strip(),
+                post.author,
+                focus_handle,
+                focus_aliases=focus_aliases,
+                focus_domain=focus_domain,
+                focus_direct_url=focus_direct_url,
+            )
         ]
     rule_claims = extract_claims_by_rules(posts)
     llm_claims, llm_error = extract_claims_by_llm(posts, resolve_llm_config(config.get("llm", {})))
