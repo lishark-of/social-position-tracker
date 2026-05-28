@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from .claim_utils import compare_latest_claims, flatten_claims_from_snapshots
+from .claim_utils import compare_latest_claims, flatten_claims_from_snapshots, is_post_relevant_to_handle
 from .collectors import collect_all
 from .extractors import extract_claims_by_llm, extract_claims_by_rules, merge_claims
 from .storage import append_snapshot, load_snapshots, resolve_llm_config
@@ -14,6 +14,13 @@ def run_pipeline(config: dict[str, Any]) -> dict[str, Any]:
     existing_claims = flatten_claims_from_snapshots(existing_snapshots, dedupe=True)
     existing_hashes = {claim["claim_hash"] for claim in existing_claims}
     posts, errors = collect_all(config)
+    focus_handle = config.get("focus_handle", "")
+    if focus_handle:
+        posts = [
+            post
+            for post in posts
+            if is_post_relevant_to_handle(post.url, f"{post.title}\n{post.text}".strip(), post.author, focus_handle)
+        ]
     rule_claims = extract_claims_by_rules(posts)
     llm_claims, llm_error = extract_claims_by_llm(posts, resolve_llm_config(config.get("llm", {})))
     if llm_error:

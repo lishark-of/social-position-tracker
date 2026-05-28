@@ -111,19 +111,37 @@ def _unique(items: list[str]) -> list[str]:
     return result
 
 
-def _build_queries(user_input: str, handle: str) -> list[str]:
-    identity = handle or user_input.strip().lstrip("@")
+def _build_queries(user_input: str, handle: str, input_kind: str) -> list[str]:
+    identity = (handle or user_input.strip().lstrip("@")).strip()
     if not identity:
         return []
-    queries = [
-        f"site:x.com/{identity} bought OR added OR holding OR sold",
-        f"site:x.com/{identity} position OR portfolio OR long OR trim",
-        f"site:reddit.com {identity} bought added holding sold position",
-        f"{identity} stocks portfolio positions holdings",
-        f"{identity} 买入 加仓 持有 卖出 清仓",
-        f"{identity} 持仓 组合 观点 股票",
-        f"{identity} 空仓 观察 减仓",
-    ]
+    if input_kind in {"x", "handle"} and handle:
+        queries = [
+            f'site:x.com/{handle}/status "I have" "$"',
+            f'site:x.com/{handle}/status "position" "$"',
+            f'site:x.com/{handle}/status "positions" "$"',
+            f'site:x.com/{handle}/status "taken a position" "$"',
+            f'site:x.com/{handle}/status "highest concentration" "$"',
+            f'site:x.com/{handle}/status "no positions" "$"',
+            f'site:x.com/{handle}/status "trimmed" "$"',
+            f'site:x.com/{handle}/status "sold" "$"',
+            f'site:x.com/{handle}/status "Long" "$"',
+            f'site:x.com/{handle}/status "hold my positions" "$"',
+            f'site:x.com/{handle}/status "portfolio" "$"',
+            f'site:x.com/{handle}/status "new position" "$"',
+            f"site:reddit.com {handle} bought added holding sold position",
+            f"{handle} 买入 加仓 持有 卖出 清仓",
+            f"{handle} 持仓 组合 观点 股票",
+            f"{handle} 空仓 观察 减仓",
+            f"{handle} stocks portfolio positions holdings",
+        ]
+    else:
+        queries = [
+            f"{identity} 买入 加仓 持有 卖出 清仓",
+            f"{identity} 持仓 组合 观点 股票",
+            f"{identity} 空仓 观察 减仓",
+            f"{identity} position portfolio bought sold holding",
+        ]
     return _unique(queries)
 
 
@@ -148,10 +166,12 @@ def _build_run_config(
     if "X" in platforms:
         if input_kind in {"x", "handle"} and handle and "/status/" not in query_input:
             x_profiles.append(handle)
+            x_status_urls.append(f"https://x.com/{handle}/with_replies")
         if input_kind == "x" and "/status/" in query_input.lower():
             x_status_urls.append(query_input)
             if handle:
                 x_profiles.append(handle)
+                x_status_urls.append(f"https://x.com/{handle}/with_replies")
 
     if "Reddit" in platforms and handle and input_kind in {"reddit", "handle"}:
         reddit_users.append(handle)
@@ -159,12 +179,13 @@ def _build_run_config(
     if "Web/Search" in platforms:
         if query_input.startswith(("http://", "https://")) and input_kind not in {"x", "reddit"}:
             web_urls.append(query_input)
-        search_queries.extend(_build_queries(query_input, handle))
+        search_queries.extend(_build_queries(query_input, handle, input_kind))
 
     search_queries.extend(custom_queries)
 
     return {
         "target_name": handle or query_input,
+        "focus_handle": handle if input_kind in {"x", "handle"} and handle else "",
         "aliases": _unique([query_input, handle]),
         "x_profiles": _unique(x_profiles),
         "x_status_urls": _unique(x_status_urls),

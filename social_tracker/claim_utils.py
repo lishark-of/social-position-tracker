@@ -16,6 +16,9 @@ CN_CODE_RE = re.compile(r"(?<!\d)([036]\d{5}|688\d{3}|159\d{3}|588\d{3}|517\d{3}
 US_TICKER_RE = re.compile(r"(?<![A-Za-z0-9$])([A-Z]{2,6})(?![A-Za-z0-9])")
 SPLIT_RE = re.compile(r"(?<=[。！？!?\.])\s+|\n+")
 ASCII_TOKEN_RE = re.compile(r"^[A-Za-z0-9 .&+\-]+$")
+X_AUTHOR_RE = re.compile(r"(?:https?://)?(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,20})(?:/|$)", re.IGNORECASE)
+URL_SOURCE_X_RE = re.compile(r"URL Source:\s*https?://(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,20})(?:/|$)", re.IGNORECASE)
+REDDIT_USER_RE = re.compile(r"(?:https?://)?(?:www\.)?reddit\.com/(?:user|u)/([A-Za-z0-9_\-]+)(?:/|$)", re.IGNORECASE)
 
 ACTION_PRIORITY = {
     "空仓": 0,
@@ -155,8 +158,10 @@ EN_BUY_TERMS = [
     "long",
     "enter",
     "entry",
+    "taken a position",
     "started a position",
     "opened a position",
+    "new position",
     "loading",
     "nibble",
 ]
@@ -168,6 +173,13 @@ EN_HOLD_TERMS = [
     "still holding",
     "not selling",
     "diamond hands",
+    "hold my positions",
+    "plan to hold",
+    "wouldn't sell",
+    "would not sell",
+    "highest concentration",
+    "have positions",
+    "positions such as",
 ]
 EN_SELL_TERMS = [
     "sell",
@@ -184,6 +196,7 @@ EN_SELL_TERMS = [
 EN_FLAT_TERMS = [
     "avoid",
     "no position",
+    "no positions",
     "cash",
     "stay away",
     "not touching",
@@ -224,6 +237,14 @@ EN_DISCLOSURE_PATTERNS = [
     r"\bi\s+trimmed\b",
     r"\bi\s+closed\s+my\s+position\b",
     r"\bi\s+have\s+no\s+position\b",
+    r"\bi\s+have\s+no\s+positions\b",
+    r"\bi\s+have\b.*\bpositions?\b",
+    r"\bi(?:'ve|\s+have)\s+taken\s+a\s+position\b",
+    r"\bnew\s+position\s+in\b",
+    r"\bi\s+have\s+positions?\b",
+    r"\bi\s+have\s+highest\s+concentration\b",
+    r"\bi\s+plan\s+to\s+hold\s+my\s+positions\b",
+    r"\bi\s+would(?:\s+not|n't)\s+sell\s+(?:any\s+)?positions\b",
     r"\bmy\s+positions?\b",
     r"\bmy\s+portfolio\b",
     r"\bi\s+am\s+long\b",
@@ -249,7 +270,30 @@ US_TICKER_STOPWORDS = {
     "EST",
     "CST",
     "RSS",
+    "OR",
+    "AM",
+    "PM",
+    "IC",
+    "SK",
+    "BOM",
+    "ATM",
+    "SBC",
 }
+X_RESERVED_PATHS = {"search", "i", "intent", "share", "home", "explore", "login", "signup", "tos", "privacy"}
+NOISE_PHRASES = [
+    "sign up with apple",
+    "create account",
+    "terms of service",
+    "privacy policy",
+    "log in",
+    "sign up",
+    "x.com/i/flow/signup",
+    "x.com/tos",
+    "x.com/privacy",
+    "site:x.com",
+    "duckduckgo",
+    "search?q=",
+]
 
 
 @lru_cache(maxsize=1)
@@ -290,6 +334,72 @@ def normalize_source(source: str) -> str:
     if value.startswith("web_search") or value == "search":
         return "search"
     return value or "unknown"
+
+
+def parse_author_from_url_or_text(source_url: str, raw_text: str) -> str:
+    text = raw_text or ""
+    url = source_url or ""
+    for pattern in (URL_SOURCE_X_RE, X_AUTHOR_RE):
+        for candidate in pattern.findall(f"{url}\n{text}"):
+            handle = candidate.strip()
+            if handle.lower() not in X_RESERVED_PATHS:
+                return handle
+    reddit_match = REDDIT_USER_RE.search(f"{url}\n{text}")
+    if reddit_match:
+        return reddit_match.group(1).strip()
+    return ""
+
+
+def normalize_handle(value: str) -> str:
+    return (value or "").strip().lstrip("@").lower()
+
+
+def is_post_relevant_to_handle(source_url: str, raw_text: str, post_author: str, focus_handle: str) -> bool:
+    handle = normalize_handle(focus_handle)
+    if not handle:
+        return True
+    combined_url = (source_url or "").lower()
+    combined_text = (raw_text or "").lower()
+    parsed_author = normalize_handle(parse_author_from_url_or_text(source_url, raw_text))
+    existing_author = normalize_handle(post_author)
+    return any(
+        [
+            f"x.com/{handle}" in combined_url,
+            f"x.com/{handle}" in combined_text,
+            handle in combined_text,
+            parsed_author == handle,
+            existing_author == handle,
+        ]
+    )
+
+
+def infer_content_source(source: str, source_url: str, raw_text: str) -> str:
+    combined = f"{source_url}\n{raw_text}".lower()
+    if "x.com/" in combined or "twitter.com/" in combined:
+        author = parse_author_from_url_or_text(source_url, raw_text)
+        if author:
+            return "x"
+    if "reddit.com/" in combined:
+        return "reddit"
+    normalized = normalize_source(source)
+    if normalized == "search":
+        return "web"
+    return normalized
+
+
+def infer_discovery_source(source: str, author: str) -> str:
+    normalized = normalize_source(source)
+    if normalized == "search" or author == "duckduckgo":
+        return "duckduckgo"
+    return ""
+
+
+def is_noise_text(text: str) -> bool:
+    lowered = (text or "").lower()
+    if not lowered:
+        return True
+    matches = sum(1 for phrase in NOISE_PHRASES if phrase in lowered)
+    return matches >= 1
 
 
 def infer_canonical_ticker(raw_text: str) -> str:
@@ -368,12 +478,16 @@ def classify_signal(evidence: str, raw_text: str) -> dict[str, Any]:
     flat_phrase = _first_phrase(text, ZH_FLAT_TERMS + EN_FLAT_TERMS)
     watch_phrase = _first_phrase(text, ZH_WATCH_TERMS + EN_WATCH_TERMS + EN_OPINION_TERMS)
     risk_phrase = _first_phrase(text, ZH_RISK_TERMS + EN_RISK_TERMS)
+    explicit_hold_phrase = _first_phrase(text, ["wouldn't sell", "would not sell", "hold my positions", "plan to hold"])
 
     action = "观察"
     action_reason = "未发现明确动作词，按观察处理"
     if flat_phrase:
         action = "空仓"
         action_reason = f"命中空仓/回避词：{flat_phrase}"
+    elif explicit_hold_phrase:
+        action = "持有"
+        action_reason = f"命中明确持有表达：{explicit_hold_phrase}"
     elif sell_phrase:
         action = "卖出"
         action_reason = f"命中卖出词：{sell_phrase}"
@@ -434,9 +548,16 @@ def extract_ticker_mentions(text: str) -> list[dict[str, Any]]:
     mentions: list[dict[str, Any]] = []
     occupied: list[tuple[int, int]] = []
 
-    def add_mention(original: str, start: int, end: int) -> None:
+    def add_mention(original: str, start: int, end: int, from_cashtag: bool = False) -> None:
         if not original:
             return
+        stripped = original.strip().replace("$", "")
+        upper = stripped.upper()
+        if not from_cashtag:
+            if upper in US_TICKER_STOPWORDS and stripped not in aliases:
+                return
+            if re.fullmatch(r"[A-Z]{1,2}", upper) and stripped not in aliases:
+                return
         current = (start, end)
         if any(_ranges_overlap(current, span) for span in occupied):
             return
@@ -447,6 +568,7 @@ def extract_ticker_mentions(text: str) -> list[dict[str, Any]]:
                 "canonical_ticker": infer_canonical_ticker(original),
                 "start": start,
                 "end": end,
+                "from_cashtag": from_cashtag,
             }
         )
 
@@ -469,7 +591,7 @@ def extract_ticker_mentions(text: str) -> list[dict[str, Any]]:
                 add_mention(match.group(0), match.start(), match.end())
 
     for match in CASHTAG_RE.finditer(text):
-        add_mention(match.group(1), match.start(1), match.end(1))
+        add_mention(match.group(1), match.start(1), match.end(1), from_cashtag=True)
 
     for match in CN_CODE_RE.finditer(text):
         add_mention(match.group(1), match.start(1), match.end(1))
@@ -511,6 +633,14 @@ def normalize_claim_dict(claim: dict[str, Any], fallback_captured_at: str = "") 
     raw_text = claim.get("raw_text") or claim.get("text") or claim.get("evidence") or ""
     raw_text_hash = claim.get("raw_text_hash") or sha256_text(raw_text)
     evidence = claim.get("evidence") or raw_text[:220]
+    parsed_author = parse_author_from_url_or_text(source_url, raw_text)
+    discovery_source = claim.get("discovery_source") or infer_discovery_source(claim.get("source", ""), claim.get("author", ""))
+    author = claim.get("author", "")
+    if author == "duckduckgo":
+        discovery_source = discovery_source or "duckduckgo"
+        author = ""
+    if parsed_author:
+        author = parsed_author
     normalized = {
         "ticker": claim.get("ticker") or canonical_ticker,
         "original_ticker_text": original_ticker_text or canonical_ticker,
@@ -522,14 +652,15 @@ def normalize_claim_dict(claim: dict[str, Any], fallback_captured_at: str = "") 
         "claim_type": claim.get("claim_type", "unknown"),
         "position_confidence": float(claim.get("position_confidence", 0.0) or 0.0),
         "is_position_disclosure": bool(claim.get("is_position_disclosure", False)),
-        "source": normalize_source(claim.get("source", "")),
+        "source": infer_content_source(claim.get("source", ""), source_url, raw_text),
+        "discovery_source": discovery_source,
         "source_url": source_url,
-        "author": claim.get("author", ""),
+        "author": author,
         "published_at": claim.get("published_at", ""),
         "captured_at": claim.get("captured_at") or claim.get("fetched_at") or fallback_captured_at or "",
         "raw_text": raw_text,
         "raw_text_hash": raw_text_hash,
-        "language": claim.get("language", "unknown"),
+        "language": claim.get("language") or detect_language(raw_text),
         "post_id": claim.get("post_id", ""),
         "extractor": claim.get("extractor", "unknown"),
     }
@@ -636,6 +767,7 @@ def build_author_position_summary(claims: list[dict[str, Any]]) -> list[dict[str
                 "position_confidence": claim.get("position_confidence", 0.0),
                 "latest_evidence": claim.get("evidence", ""),
                 "source": claim.get("source", ""),
+                "discovery_source": claim.get("discovery_source", ""),
                 "source_url": claim.get("source_url", ""),
                 "latest_captured_at": claim.get("captured_at", ""),
                 "latest_published_at": claim.get("published_at", ""),
