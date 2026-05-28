@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>华为“韬定律”技术路线与可投资方向</title>
+    <style>
+      :root {
+        --bg-1: #07131f;
+        --bg-2: #0f2231;
+        --bg-3: #15384f;
+        --ink: #eef4f7;
+        --muted: rgba(238, 244, 247, 0.72);
+        --line: rgba(255, 255, 255, 0.14);
+        --gold: #ffcc74;
+        --teal: #55d6c2;
+        --rose: #ff8f70;
+        --card: rgba(9, 20, 31, 0.62);
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at 15% 20%, rgba(85, 214, 194, 0.18), transparent 24%),
+          radial-gradient(circle at 82% 18%, rgba(255, 204, 116, 0.2), transparent 18%),
+          radial-gradient(circle at 78% 82%, rgba(255, 143, 112, 0.16), transparent 22%),
+          linear-gradient(140deg, var(--bg-1), var(--bg-2) 52%, var(--bg-3));
+        color: var(--ink);
+        font-family: "Avenir Next", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+        overflow: hidden;
+      }
+
+      body::before,
+      body::after {
+        content: "";
+        position: fixed;
+        inset: auto;
+        width: 42vw;
+        height: 42vw;
+        border-radius: 50%;
+        filter: blur(70px);
+        opacity: 0.15;
+        pointer-events: none;
+        animation: drift 18s ease-in-out infinite alternate;
+      }
+
+      body::before {
+        top: -10vw;
+        left: -6vw;
+        background: rgba(85, 214, 194, 0.8);
+      }
+
+      body::after {
+        right: -8vw;
+        bottom: -12vw;
+        background: rgba(255, 204, 116, 0.65);
+        animation-duration: 22s;
+      }
+
+      .shell {
+        position: relative;
+        min-height: 100vh;
+        padding: 28px 34px 24px;
+      }
+
+      .topbar {
+        position: relative;
+        z-index: 3;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        margin-bottom: 16px;
+      }
+
+      .brand,
+      .meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        background: rgba(5, 12, 19, 0.4);
+        backdrop-filter: blur(14px);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+      }
+
+      .brand strong {
+        color: var(--ink);
+      }
+
+      .progress {
+        position: absolute;
+        left: 34px;
+        right: 34px;
+        top: 78px;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        overflow: hidden;
+        z-index: 3;
+      }
+
+      .progress-bar {
+        width: 0;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--teal), var(--gold));
+        transition: width 0.45s ease;
+      }
+
+      .deck {
+        position: relative;
+        height: calc(100vh - 118px);
+      }
+
+      .slide {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: 1.08fr 0.92fr;
+        gap: 28px;
+        align-items: stretch;
+        padding: 28px 8px 12px;
+        opacity: 0;
+        transform: translateY(24px) scale(0.985);
+        pointer-events: none;
+        transition:
+          opacity 0.9s ease,
+          transform 0.9s ease;
+      }
+
+      .slide.active {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        pointer-events: auto;
+      }
+
+      .panel {
+        background: var(--card);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 30px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(22px);
+        padding: 34px;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .panel::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: var(--gold);
+        margin-bottom: 16px;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 28px;
+        height: 1px;
+        background: currentColor;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-family: "Iowan Old Style", "Songti SC", "Noto Serif SC", serif;
+        font-size: clamp(42px, 5vw, 72px);
+        line-height: 1.04;
+        letter-spacing: -0.03em;
+        max-width: 8.8em;
+      }
+
+      h2 {
+        font-family: "Iowan Old Style", "Songti SC", "Noto Serif SC", serif;
+        font-size: clamp(30px, 3.4vw, 52px);
+        line-height: 1.08;
+        margin-bottom: 16px;
+      }
+
+      .lead {
+        font-size: clamp(17px, 2vw, 24px);
+        line-height: 1.7;
+        color: var(--muted);
+        max-width: 31em;
+      }
+
+      .hero-note {
+        margin-top: 24px;
+        padding: 18px 20px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, rgba(85, 214, 194, 0.12), rgba(255, 204, 116, 0.14));
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 16px;
+        line-height: 1.8;
+        color: rgba(238, 244, 247, 0.88);
+      }
+
+      .kpi-grid,
+      .stack-grid,
+      .portfolio-grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-top: 22px;
+      }
+
+      .metric,
+      .stack-card,
+      .portfolio-card,
+      .signal-card {
+        border-radius: 22px;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        background: rgba(255, 255, 255, 0.04);
+        padding: 20px 18px;
+      }
+
+      .metric strong {
+        display: block;
+        font-size: clamp(28px, 3vw, 44px);
+        line-height: 1;
+        margin-bottom: 10px;
+      }
+
+      .metric span,
+      .signal-card p,
+      .stack-card p,
+      .portfolio-card p,
+      .caption,
+      .bullets li,
+      .timeline-point p {
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .bullets {
+        list-style: none;
+        padding: 0;
+        margin: 22px 0 0;
+        display: grid;
+        gap: 12px;
+      }
+
+      .bullets li {
+        padding-left: 18px;
+        position: relative;
+        font-size: 16px;
+      }
+
+      .bullets li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 11px;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--gold), var(--teal));
+        box-shadow: 0 0 18px rgba(255, 204, 116, 0.6);
+      }
+
+      .diagram {
+        position: relative;
+        min-height: 100%;
+        display: grid;
+        place-items: center;
+      }
+
+      .orbital {
+        position: relative;
+        width: min(33vw, 460px);
+        aspect-ratio: 1;
+      }
+
+      .ring,
+      .core,
+      .node {
+        position: absolute;
+        border-radius: 50%;
+      }
+
+      .ring {
+        inset: 12%;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        animation: rotate 18s linear infinite;
+      }
+
+      .ring.r2 {
+        inset: 0;
+        border-style: dashed;
+        animation-direction: reverse;
+        animation-duration: 24s;
+      }
+
+      .core {
+        inset: 28%;
+        background:
+          radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.28), transparent 34%),
+          linear-gradient(145deg, rgba(85, 214, 194, 0.95), rgba(255, 204, 116, 0.92));
+        box-shadow:
+          0 0 60px rgba(85, 214, 194, 0.28),
+          inset 0 0 28px rgba(255, 255, 255, 0.2);
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 24px;
+        font-weight: 700;
+        line-height: 1.45;
+      }
+
+      .node {
+        width: 118px;
+        height: 118px;
+        padding: 20px 16px;
+        background: rgba(7, 17, 28, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: grid;
+        place-items: center;
+        text-align: center;
+        font-size: 14px;
+        line-height: 1.55;
+        animation: pulse 3.5s ease-in-out infinite;
+      }
+
+      .node.n1 { top: -3%; left: 34%; }
+      .node.n2 { top: 34%; right: -4%; animation-delay: 0.8s; }
+      .node.n3 { bottom: -1%; left: 34%; animation-delay: 1.6s; }
+      .node.n4 { top: 34%; left: -4%; animation-delay: 2.4s; }
+
+      .shift {
+        display: grid;
+        gap: 16px;
+      }
+
+      .shift-card {
+        padding: 18px 20px;
+        border-radius: 22px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .shift-card strong,
+      .stack-card strong,
+      .portfolio-card strong,
+      .signal-card strong,
+      .timeline-point strong {
+        display: block;
+        font-size: 20px;
+        margin-bottom: 8px;
+      }
+
+      .divider-arrow {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        color: var(--gold);
+        margin: 16px 0;
+        font-size: 14px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .divider-arrow::before,
+      .divider-arrow::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(255, 204, 116, 0.7), transparent);
+      }
+
+      .stack-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-content: start;
+        height: 100%;
+      }
+
+      .stack-card {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .stack-card::after {
+        content: attr(data-step);
+        position: absolute;
+        right: 18px;
+        bottom: 14px;
+        font-size: 42px;
+        font-weight: 800;
+        color: rgba(255, 255, 255, 0.05);
+      }
+
+      .timeline {
+        position: relative;
+        margin-top: 10px;
+        padding-left: 28px;
+      }
+
+      .timeline::before {
+        content: "";
+        position: absolute;
+        left: 8px;
+        top: 6px;
+        bottom: 6px;
+        width: 2px;
+        background: linear-gradient(180deg, var(--teal), rgba(255, 255, 255, 0.08), var(--gold));
+      }
+
+      .timeline-point {
+        position: relative;
+        padding: 0 0 30px 26px;
+      }
+
+      .timeline-point::before {
+        content: "";
+        position: absolute;
+        left: -2px;
+        top: 8px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--teal), var(--gold));
+        box-shadow: 0 0 18px rgba(85, 214, 194, 0.38);
+      }
+
+      .timeline-point .year {
+        color: var(--gold);
+        font-size: 14px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .signals {
+        display: grid;
+        gap: 16px;
+      }
+
+      .signal-card {
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+      }
+
+      .signal-no {
+        flex: 0 0 44px;
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        color: #06101a;
+        background: linear-gradient(135deg, var(--gold), #ffe9bb);
+      }
+
+      .matrix {
+        display: grid;
+        gap: 18px;
+        margin-top: 14px;
+      }
+
+      .matrix-row {
+        display: grid;
+        grid-template-columns: 130px 1fr 84px;
+        gap: 16px;
+        align-items: center;
+      }
+
+      .matrix-row span {
+        color: var(--muted);
+      }
+
+      .track {
+        height: 12px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .fill {
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--teal), var(--gold));
+        transform-origin: left center;
+        animation: grow 1.4s ease both;
+      }
+
+      .portfolio-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 20px;
+      }
+
+      .portfolio-card {
+        min-height: 220px;
+      }
+
+      .portfolio-card small {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--gold);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 14px;
+      }
+
+      .bottom-note {
+        margin-top: 18px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 14px;
+        padding: 18px 22px;
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .bottom-note strong {
+        font-size: 22px;
+      }
+
+      .nav {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 2px;
+        z-index: 3;
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.26);
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        transition: transform 0.3s ease, background 0.3s ease;
+      }
+
+      .dot.active {
+        background: linear-gradient(135deg, var(--teal), var(--gold));
+        transform: scale(1.45);
+      }
+
+      .hint {
+        position: absolute;
+        right: 34px;
+        bottom: 24px;
+        z-index: 3;
+        color: rgba(238, 244, 247, 0.56);
+        font-size: 13px;
+      }
+
+      .slide.active .panel > * {
+        animation: rise 0.85s ease both;
+      }
+
+      .slide.active .panel > *:nth-child(2) { animation-delay: 0.08s; }
+      .slide.active .panel > *:nth-child(3) { animation-delay: 0.16s; }
+      .slide.active .panel > *:nth-child(4) { animation-delay: 0.24s; }
+      .slide.active .panel > *:nth-child(5) { animation-delay: 0.32s; }
+      .slide.active .panel > *:nth-child(6) { animation-delay: 0.4s; }
+
+      @keyframes rotate {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes pulse {
+        0%, 100% { transform: translateY(0) scale(1); }
+        50% { transform: translateY(-8px) scale(1.03); }
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes grow {
+        from { transform: scaleX(0); }
+        to { transform: scaleX(1); }
+      }
+
+      @keyframes drift {
+        from { transform: translate3d(0, 0, 0) scale(1); }
+        to { transform: translate3d(4vw, 3vh, 0) scale(1.08); }
+      }
+
+      @media (max-width: 1080px) {
+        body {
+          overflow: auto;
+        }
+
+        .shell {
+          min-height: 100vh;
+          padding: 20px;
+        }
+
+        .progress {
+          left: 20px;
+          right: 20px;
+          top: 72px;
+        }
+
+        .deck {
+          height: auto;
+          display: grid;
+          gap: 16px;
+        }
+
+        .slide,
+        .slide.active {
+          position: relative;
+          opacity: 1;
+          transform: none;
+          pointer-events: auto;
+          grid-template-columns: 1fr;
+          padding: 16px 0 0;
+        }
+
+        .orbital {
+          width: min(78vw, 420px);
+        }
+
+        .stack-grid,
+        .portfolio-grid,
+        .kpi-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .nav,
+        .hint {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>演示动画</strong><span>华为“韬定律”技术路线与可投资方向</span></div>
+        <div class="meta">自动播放 · 6 幕叙事 · 可键盘切换</div>
+      </div>
+      <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+
+      <main class="deck" id="deck">
+        <section class="slide active">
+          <div class="panel">
+            <div class="eyebrow">Narrative 01</div>
+            <h1>从拼纳米<br />转向拼时间效率</h1>
+            <p class="lead">
+              “韬定律”的关键，不是放弃先进制程，而是把竞争焦点从几何缩微转向
+              <strong>时间缩微</strong>：让数据传得更短、访存更快、互连更低时延、系统整体更省电。
+            </p>
+            <div class="hero-note">
+              核心判断：真正更值得投的，不是“下一个麒麟/昇腾”本体，而是围绕互连、封装、光通信、EDA
+              与 AI 基础设施的外溢受益链。
+            </div>
+            <div class="kpi-grid">
+              <div class="metric">
+                <strong>短路径</strong>
+                <span>缩短信号与访存距离，提升系统响应速度。</span>
+              </div>
+              <div class="metric">
+                <strong>统一化</strong>
+                <span>统一总线、统一内存编址、统一调度协同。</span>
+              </div>
+              <div class="metric">
+                <strong>可落地</strong>
+                <span>先从手机验证，再在超节点和 AI 集群里兑现。</span>
+              </div>
+              <div class="metric">
+                <strong>可投资</strong>
+                <span>优先抓现金流确定性高的受益环节。</span>
+              </div>
+            </div>
+          </div>
+          <div class="panel diagram">
+            <div class="orbital">
+              <div class="ring"></div>
+              <div class="ring r2"></div>
+              <div class="core">韬定律<br />Tau Scaling</div>
+              <div class="node n1">逻辑折叠<br />缩短布线</div>
+              <div class="node n2">统一总线<br />统一内存</div>
+              <div class="node n3">超节点<br />全光互联</div>
+              <div class="node n4">软硬芯协同<br />系统优化</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide">
+          <div class="panel">
+            <div class="eyebrow">Narrative 02</div>
+            <h2>技术目标发生了结构性迁移</h2>
+            <div class="shift">
+              <div class="shift-card">
+                <strong>旧范式：几何缩微</strong>
+                <p>核心是晶体管更小、单位面积密度更高，竞争焦点集中在制程代际。</p>
+              </div>
+              <div class="divider-arrow">Shift</div>
+              <div class="shift-card">
+                <strong>新范式：时间缩微</strong>
+                <p>核心是延迟更低、访存更短、跨柜互联更快，系统级优化开始压过单点制程优化。</p>
+              </div>
+            </div>
+            <ul class="bullets">
+              <li>手机是技术验证场，真正的大资本开支仍在 AI 服务器和数据中心。</li>
+              <li>Logic Folding 映射到混合键合、热设计、EDA 和先进封装。</li>
+              <li>Unified Bus/统一内存池是当前最成熟、最接近兑现的一环。</li>
+              <li>Hi-ONE 长期看向 CPO，短期业绩更可能先落在 800G/1.6T 光模块。</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="eyebrow">Signals</div>
+            <div class="signals">
+              <div class="signal-card">
+                <div class="signal-no">1</div>
+                <div>
+                  <strong>不是单颗芯片竞赛</strong>
+                  <p>它更像“芯片 + 互连 + 内存 + 系统 + 云”的整体性能工程。</p>
+                </div>
+              </div>
+              <div class="signal-card">
+                <div class="signal-no">2</div>
+                <div>
+                  <strong>成熟度先后分层</strong>
+                  <p>统一内存池与高速互连更早兑现，真正 3D Folding 仍需要更长验证周期。</p>
+                </div>
+              </div>
+              <div class="signal-card">
+                <div class="signal-no">3</div>
+                <div>
+                  <strong>投资要买“卖水人”</strong>
+                  <p>直接押英雄难度高，围绕底层基础设施配置，胜率和可见度更高。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide">
+          <div class="panel">
+            <div class="eyebrow">Narrative 03</div>
+            <h2>路线图分四层展开</h2>
+            <p class="lead">从器件、电路、芯片到系统，华为把“时间优化”拆成一个可以逐层兑现的技术栈。</p>
+            <ul class="bullets">
+              <li>器件层：降低 RC 与寄生损耗，压缩底层延迟。</li>
+              <li>电路层：通过逻辑折叠缩短平面布线，提升垂直密度。</li>
+              <li>芯片层：软硬芯协同，改善带宽、功耗和封装体积。</li>
+              <li>系统层：统一内存编址、超节点互联、原生内存语义。</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="eyebrow">Stack</div>
+            <div class="stack-grid">
+              <div class="stack-card" data-step="01">
+                <strong>Logic Folding</strong>
+                <p>适合映射混合键合、背供电、热设计与 EDA，不宜只盯 SRAM 本身。</p>
+              </div>
+              <div class="stack-card" data-step="02">
+                <strong>Unified Bus</strong>
+                <p>最成熟的一环，受益方向包括内存接口芯片、CXL 类互连和服务器载板。</p>
+              </div>
+              <div class="stack-card" data-step="03">
+                <strong>统一内存池</strong>
+                <p>让多节点资源共享与统一寻址成为现实，直接改善集群效率。</p>
+              </div>
+              <div class="stack-card" data-step="04">
+                <strong>Hi-ONE 光互联</strong>
+                <p>长期看向硅光与 CPO，短期先受益的是可插拔光模块与前置器件。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide">
+          <div class="panel">
+            <div class="eyebrow">Narrative 04</div>
+            <h2>商业化不是一步到位，而是分阶段穿透</h2>
+            <div class="timeline">
+              <div class="timeline-point">
+                <div class="year">2026</div>
+                <strong>麒麟率先导入 Logic Folding</strong>
+                <p>手机端先做能力验证，证明三维逻辑与热管理路线可行。</p>
+              </div>
+              <div class="timeline-point">
+                <div class="year">2026 Q4</div>
+                <strong>Ascend 950DT 与 Atlas 950 上市</strong>
+                <p>超节点开始承接真正的 AI 基础设施需求，兑现路径更明确。</p>
+              </div>
+              <div class="timeline-point">
+                <div class="year">2027 Q4</div>
+                <strong>Atlas 960 上市</strong>
+                <p>系统级互连、统一内存和大规模集群能力继续向上推进。</p>
+              </div>
+              <div class="timeline-point">
+                <div class="year">2030+</div>
+                <strong>3D Folding 深入 AI 加速器</strong>
+                <p>真正意义上的前沿赔率，兑现更慢，但弹性也最大。</p>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="eyebrow">Commercial Rhythm</div>
+            <div class="signals">
+              <div class="signal-card">
+                <div class="signal-no">A</div>
+                <div>
+                  <strong>先验证</strong>
+                  <p>手机和折叠终端承担路线试验田角色，目标是证明技术可用而非贡献最大 TAM。</p>
+                </div>
+              </div>
+              <div class="signal-card">
+                <div class="signal-no">B</div>
+                <div>
+                  <strong>先变现</strong>
+                  <p>超节点、AI 服务器、高速互连和统一内存池，是更早进入资本开支主战场的环节。</p>
+                </div>
+              </div>
+              <div class="signal-card">
+                <div class="signal-no">C</div>
+                <div>
+                  <strong>再升级</strong>
+                  <p>随着 CPO、混合键合和 3D 堆叠成熟，投资机会会从现金流转向高赔率技术弹性。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide">
+          <div class="panel">
+            <div class="eyebrow">Narrative 05</div>
+            <h2>投资重点要按兑现顺序排优先级</h2>
+            <p class="lead">最优策略不是“哪个故事最性感”，而是“哪个环节最先兑现、最能吃到资本开支”。</p>
+            <div class="matrix">
+              <div class="matrix-row">
+                <span>光模块 / 光器件</span>
+                <div class="track"><div class="fill" style="width: 92%"></div></div>
+                <strong>优先</strong>
+              </div>
+              <div class="matrix-row">
+                <span>接口芯片 / CXL</span>
+                <div class="track"><div class="fill" style="width: 88%"></div></div>
+                <strong>优先</strong>
+              </div>
+              <div class="matrix-row">
+                <span>先进封装 / OSAT</span>
+                <div class="track"><div class="fill" style="width: 84%"></div></div>
+                <strong>优先</strong>
+              </div>
+              <div class="matrix-row">
+                <span>高速 PCB / 载板</span>
+                <div class="track"><div class="fill" style="width: 78%"></div></div>
+                <strong>增配</strong>
+              </div>
+              <div class="matrix-row">
+                <span>EDA / IP</span>
+                <div class="track"><div class="fill" style="width: 66%"></div></div>
+                <strong>中配</strong>
+              </div>
+              <div class="matrix-row">
+                <span>CPO / 3D Folding / HBM</span>
+                <div class="track"><div class="fill" style="width: 44%"></div></div>
+                <strong>期权</strong>
+              </div>
+            </div>
+            <div class="hero-note">
+              近两年先抓现金流与订单能见度；两到四年看技术拐点；更长期再押注真正的 3D Folding 与国产 HBM。
+            </div>
+          </div>
+          <div class="panel">
+            <div class="eyebrow">Why This Works</div>
+            <ul class="bullets">
+              <li>AI 服务器和数据中心的市场空间，明显大于手机本体。</li>
+              <li>统一内存池和高速互连已经比前沿 3D 技术更接近现实交付。</li>
+              <li>先进封装、CoWoS、HBM 与电力仍是产业扩张的核心瓶颈。</li>
+              <li>因此，围绕瓶颈配置，往往比围绕明星芯片配置更稳健。</li>
+            </ul>
+            <div class="bottom-note">
+              <div>
+                <strong>买“卖水人”</strong>
+                <p class="caption">优先配置确定性高的基础设施环节，而不是单押技术英雄。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="slide">
+          <div class="panel">
+            <div class="eyebrow">Narrative 06</div>
+            <h2>组合建议：先现金流，后拐点，留期权</h2>
+            <div class="portfolio-grid">
+              <div class="portfolio-card">
+                <small>保守型</small>
+                <strong>光互联 + 封装 + 互连</strong>
+                <p>重点拿确定性，优先吃 AI 基建扩张的已验证需求。</p>
+              </div>
+              <div class="portfolio-card">
+                <small>平衡型</small>
+                <strong>三足鼎立组合</strong>
+                <p>同时覆盖光模块、接口芯片、先进封装，并加入部分 EDA 弹性。</p>
+              </div>
+              <div class="portfolio-card">
+                <small>激进型</small>
+                <strong>小仓位押高赔率</strong>
+                <p>用有限仓位博 CPO、混合键合、3D Folding 与国产 HBM 的未来弹性。</p>
+              </div>
+            </div>
+            <div class="hero-note">
+              最后的压缩表达：<strong>先买“灵衢受益链”和“光互联现金流”，再用小仓位押注 3D Folding 与 CPO。</strong>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="eyebrow">Closing</div>
+            <h2>这不是一条“更小制程”路线，而是一条“更短时间路径”路线。</h2>
+            <p class="lead">
+              因此，真正该追踪的是系统级性能重构背后的产业分工变化：
+              谁帮助数据走得更快，谁就更可能先吃到这一轮投资机会。
+            </p>
+            <ul class="bullets">
+              <li>短期看兑现：光模块、OSAT、接口芯片。</li>
+              <li>中期看拐点：混合键合、CPO、EDA。</li>
+              <li>长期看赔率：3D Folding、国产 HBM、前沿 AI 芯片弹性。</li>
+            </ul>
+          </div>
+        </section>
+      </main>
+
+      <div class="nav" id="nav"></div>
+      <div class="hint">空格暂停 / 方向键切换</div>
+    </div>
+
+    <script>
+      const slides = Array.from(document.querySelectorAll(".slide"));
+      const progressBar = document.getElementById("progressBar");
+      const nav = document.getElementById("nav");
+      const slideDuration = 7000;
+      let index = 0;
+      let timer = null;
+      let paused = false;
+
+      slides.forEach((_, i) => {
+        const button = document.createElement("button");
+        button.className = "dot" + (i === 0 ? " active" : "");
+        button.setAttribute("aria-label", `跳转到第 ${i + 1} 幕`);
+        button.addEventListener("click", () => {
+          index = i;
+          render();
+          restart();
+        });
+        nav.appendChild(button);
+      });
+
+      const dots = Array.from(document.querySelectorAll(".dot"));
+
+      function render() {
+        slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+        dots.forEach((dot, i) => dot.classList.toggle("active", i === index));
+        progressBar.style.width = `${((index + 1) / slides.length) * 100}%`;
+      }
+
+      function next() {
+        index = (index + 1) % slides.length;
+        render();
+      }
+
+      function start() {
+        timer = window.setInterval(next, slideDuration);
+      }
+
+      function stop() {
+        if (timer) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+      }
+
+      function restart() {
+        stop();
+        if (!paused) start();
+      }
+
+      function togglePause() {
+        paused = !paused;
+        if (paused) stop();
+        else start();
+      }
+
+      document.addEventListener("keydown", (event) => {
+        if (event.code === "ArrowRight") {
+          index = (index + 1) % slides.length;
+          render();
+          restart();
+        } else if (event.code === "ArrowLeft") {
+          index = (index - 1 + slides.length) % slides.length;
+          render();
+          restart();
+        } else if (event.code === "Space") {
+          event.preventDefault();
+          togglePause();
+        }
+      });
+
+      render();
+      start();
+    </script>
+  </body>
+</html>
